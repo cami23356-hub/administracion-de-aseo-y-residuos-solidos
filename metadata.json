@@ -1,0 +1,6 @@
+{
+  "name": "PLATAFORMA INTEGRAL DE ADMINISTRACIÓN DEL ASEO Y RESIDUOS SÓLIDOS – CESGE",
+  "description": "Sistema integral de administración del proceso de aseo, inventarios químicos, programación de jornadas, visión artificial y gestión de residuos sólidos para el CESGE – Torre Norte.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
