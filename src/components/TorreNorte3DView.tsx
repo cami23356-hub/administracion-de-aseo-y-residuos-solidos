@@ -12,10 +12,11 @@ interface TorreNorte3DViewProps {
   onSelectFloor: (floorId: number) => void;
 }
 
-type CameraPreset = 'general' | 'parking' | 'front';
+type CameraPreset = 'general' | 'stairs' | 'parking' | 'front';
 
 const PRESET_VIEWS: Record<CameraPreset, { pos: [number, number, number]; target: [number, number, number] }> = {
-  general: { pos: [19.5, 14.5, 22], target: [0, 5.0, 0] },
+  general: { pos: [19.5, 14.5, 22], target: [0.6, 5.0, -0.3] },
+  stairs: { pos: [15.5, 6.4, 10.5], target: [4.6, 5.0, -2.0] },
   parking: { pos: [13, 4.2, 13.5], target: [0, -0.6, 0] },
   front: { pos: [0.2, 7.5, 25], target: [0, 5.0, 0] },
 };
@@ -408,6 +409,192 @@ export default function TorreNorte3DView({
     const hitGeo = trackGeo(new THREE.BoxGeometry(9.6, 1.05, 7.6));
     const badgeGeo = trackGeo(new THREE.PlaneGeometry(2.75, 0.82));
 
+    // Shared materials & reusable geometries for exterior Emergency Stairs (matching reference photo)
+    const stairTrimMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x6e3b53, roughness: 0.42, metalness: 0.45 })
+    );
+    const stairPanelMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xd6d1c4, roughness: 0.82, metalness: 0.04 })
+    );
+    const stairPilasterMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xe6e1d6, roughness: 0.72, metalness: 0.06 })
+    );
+    const stairSteelDarkMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.48, metalness: 0.62 })
+    );
+    const stairExitSignMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.5, metalness: 0.1 })
+    );
+
+    const stairPilasterGeo = trackGeo(new THREE.BoxGeometry(0.22, 1.04, 0.22));
+    const stairColGeo = trackGeo(new THREE.CylinderGeometry(0.065, 0.065, 1.04, 10));
+    const stairInnerLandingGeo = trackGeo(new THREE.BoxGeometry(0.72, 0.11, 2.02));
+    const stairTieBeamGeo = trackGeo(new THREE.BoxGeometry(1.52, 0.07, 0.07));
+    const stairExitDoorGeo = trackGeo(new THREE.BoxGeometry(0.06, 0.74, 0.62));
+    const stairTreadGeo = trackGeo(new THREE.BoxGeometry(0.19, 0.055, 0.84));
+    const stairPostGeo = trackGeo(new THREE.BoxGeometry(0.055, 0.39, 0.055));
+
+    // Chamfered octagonal landing deck (ExtrudeGeometry) matching the photo's beveled outer corners
+    const chamferShape = new THREE.Shape();
+    chamferShape.moveTo(0, -1.0);
+    chamferShape.lineTo(0.32, -1.0);
+    chamferShape.lineTo(0.68, -0.64);
+    chamferShape.lineTo(0.68, 0.64);
+    chamferShape.lineTo(0.32, 1.0);
+    chamferShape.lineTo(0, 1.0);
+    chamferShape.closePath();
+    const chamferDeckGeo = trackGeo(
+      new THREE.ExtrudeGeometry(chamferShape, {
+        depth: 0.11,
+        bevelEnabled: true,
+        bevelThickness: 0.015,
+        bevelSize: 0.015,
+        bevelSegments: 2,
+      })
+    );
+    chamferDeckGeo.rotateX(-Math.PI / 2);
+
+    // Reusable guardrail & sloped flight panel geometries
+    const railOuterPanelGeo = trackGeo(new THREE.BoxGeometry(0.04, 0.26, 1.24));
+    const railOuterTopGeo = trackGeo(new THREE.BoxGeometry(0.065, 0.065, 1.28));
+    const railChamferPanelGeo = trackGeo(new THREE.BoxGeometry(0.51, 0.26, 0.04));
+    const railChamferTopGeo = trackGeo(new THREE.BoxGeometry(0.53, 0.065, 0.065));
+    const railShortSidePanelGeo = trackGeo(new THREE.BoxGeometry(0.34, 0.26, 0.04));
+    const railShortSideTopGeo = trackGeo(new THREE.BoxGeometry(0.36, 0.065, 0.065));
+
+    const flightLenA = Math.hypot(0.87, 0.46);
+    const flightAngleA = Math.atan2(0.46, 0.87);
+    const flightLenB = Math.hypot(0.87, 0.52);
+    const flightAngleB = Math.atan2(0.52, 0.87);
+
+    const flightPanelGeoA = trackGeo(new THREE.BoxGeometry(flightLenA, 0.28, 0.04));
+    const flightRailGeoA = trackGeo(new THREE.BoxGeometry(flightLenA + 0.04, 0.065, 0.065));
+    const flightSoffitGeoA = trackGeo(new THREE.BoxGeometry(flightLenA, 0.08, 0.88));
+
+    const flightPanelGeoB = trackGeo(new THREE.BoxGeometry(flightLenB, 0.28, 0.04));
+    const flightRailGeoB = trackGeo(new THREE.BoxGeometry(flightLenB + 0.04, 0.065, 0.065));
+    const flightSoffitGeoB = trackGeo(new THREE.BoxGeometry(flightLenB, 0.08, 0.88));
+
+    const addChamferedBalconyRail = (parent: THREE.Group, yDeck: number) => {
+      const yMid = yDeck + 0.22;
+      const yBot = yDeck + 0.07;
+      const yTop = yDeck + 0.37;
+
+      // Flat outer face (+X at x = 6.54, z in [-2.99, -1.71])
+      const outerPanel = new THREE.Mesh(railOuterPanelGeo, stairPanelMat);
+      outerPanel.position.set(6.54, yMid, -2.35);
+      parent.add(outerPanel);
+      const outerTop = new THREE.Mesh(railOuterTopGeo, stairTrimMat);
+      outerTop.position.set(6.54, yTop, -2.35);
+      parent.add(outerTop);
+      const outerBot = new THREE.Mesh(railOuterTopGeo, stairTrimMat);
+      outerBot.position.set(6.54, yBot, -2.35);
+      parent.add(outerBot);
+
+      // Front-right 45° chamfered face (from x=6.20, z=-1.35 to x=6.56, z=-1.71)
+      const frontChamferPanel = new THREE.Mesh(railChamferPanelGeo, stairPanelMat);
+      frontChamferPanel.position.set(6.38, yMid, -1.53);
+      frontChamferPanel.rotation.y = Math.PI / 4;
+      parent.add(frontChamferPanel);
+      const frontChamferTop = new THREE.Mesh(railChamferTopGeo, stairTrimMat);
+      frontChamferTop.position.set(6.38, yTop, -1.53);
+      frontChamferTop.rotation.y = Math.PI / 4;
+      parent.add(frontChamferTop);
+      const frontChamferBot = new THREE.Mesh(railChamferTopGeo, stairTrimMat);
+      frontChamferBot.position.set(6.38, yBot, -1.53);
+      frontChamferBot.rotation.y = Math.PI / 4;
+      parent.add(frontChamferBot);
+
+      // Back-right 45° chamfered face (from x=6.20, z=-3.35 to x=6.56, z=-2.99)
+      const backChamferPanel = new THREE.Mesh(railChamferPanelGeo, stairPanelMat);
+      backChamferPanel.position.set(6.38, yMid, -3.17);
+      backChamferPanel.rotation.y = -Math.PI / 4;
+      parent.add(backChamferPanel);
+      const backChamferTop = new THREE.Mesh(railChamferTopGeo, stairTrimMat);
+      backChamferTop.position.set(6.38, yTop, -3.17);
+      backChamferTop.rotation.y = -Math.PI / 4;
+      parent.add(backChamferTop);
+      const backChamferBot = new THREE.Mesh(railChamferTopGeo, stairTrimMat);
+      backChamferBot.position.set(6.38, yBot, -3.17);
+      backChamferBot.rotation.y = -Math.PI / 4;
+      parent.add(backChamferBot);
+
+      // Short side returns on z = -1.35 and z = -3.35 (x from 5.88 to 6.20)
+      for (const rz of [-1.35, -3.35]) {
+        const sPanel = new THREE.Mesh(railShortSidePanelGeo, stairPanelMat);
+        sPanel.position.set(6.04, yMid, rz);
+        parent.add(sPanel);
+        const sTop = new THREE.Mesh(railShortSideTopGeo, stairTrimMat);
+        sTop.position.set(6.04, yTop, rz);
+        parent.add(sTop);
+        const sBot = new THREE.Mesh(railShortSideTopGeo, stairTrimMat);
+        sBot.position.set(6.04, yBot, rz);
+        parent.add(sBot);
+      }
+
+      // Corner vertical plum steel posts
+      const postCoords: Array<[number, number]> = [
+        [6.2, -1.35],
+        [6.54, -1.71],
+        [6.54, -2.99],
+        [6.2, -3.35],
+      ];
+      for (const [px, pz] of postCoords) {
+        const post = new THREE.Mesh(stairPostGeo, stairTrimMat);
+        post.position.set(px, yDeck + 0.22, pz);
+        parent.add(post);
+      }
+    };
+
+    const addSlopedFlight = (
+      parent: THREE.Group,
+      panelGeo: THREE.BoxGeometry,
+      railGeo: THREE.BoxGeometry,
+      soffitGeo: THREE.BoxGeometry,
+      centerX: number,
+      centerY: number,
+      centerZ: number,
+      rotZ: number,
+      startX: number,
+      endX: number,
+      startY: number,
+      endY: number
+    ) => {
+      // Dark steel soffit slab underneath treads
+      const soffit = new THREE.Mesh(soffitGeo, stairSteelDarkMat);
+      soffit.position.set(centerX, centerY - 0.05, centerZ);
+      soffit.rotation.z = rotZ;
+      parent.add(soffit);
+
+      // 5 stepped individual treads
+      const steps = 5;
+      for (let s = 0; s < steps; s++) {
+        const t = (s + 0.5) / steps;
+        const tread = new THREE.Mesh(stairTreadGeo, stairSteelDarkMat);
+        tread.position.set(startX + (endX - startX) * t, startY + (endY - startY) * t, centerZ);
+        parent.add(tread);
+      }
+
+      // Guardrail panels & plum steel top/bottom stringers on both sides of the flight
+      for (const sideOffset of [-0.45, 0.45]) {
+        const rz = centerZ + sideOffset;
+        const panel = new THREE.Mesh(panelGeo, stairPanelMat);
+        panel.position.set(centerX, centerY + 0.16, rz);
+        panel.rotation.z = rotZ;
+        parent.add(panel);
+
+        const topRail = new THREE.Mesh(railGeo, stairTrimMat);
+        topRail.position.set(centerX, centerY + 0.31, rz);
+        topRail.rotation.z = rotZ;
+        parent.add(topRail);
+
+        const botStringer = new THREE.Mesh(railGeo, stairTrimMat);
+        botStringer.position.set(centerX, centerY - 0.01, rz);
+        botStringer.rotation.z = rotZ;
+        parent.add(botStringer);
+      }
+    };
+
     sortedFloors.forEach((floor) => {
       const group = new THREE.Group();
       const isSotano = floor.code === 'SOTANO';
@@ -513,6 +700,26 @@ export default function TorreNorte3DView({
         const canopy = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.4, 0.16, 1.6)), canopyMat);
         canopy.position.set(0, 0.98, 4.95);
         group.add(canopy);
+
+        // Exterior emergency stairs ground arrival pad & readable signage (right-rear side)
+        const exitPad = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.45, 0.16, 2.35)), stairPilasterMat);
+        exitPad.position.set(5.6, 0.02, -2.35);
+        group.add(exitPad);
+
+        const exitStripe = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.35, 0.04, 0.35)), stairExitSignMat);
+        exitStripe.position.set(5.6, 0.1, -1.25);
+        group.add(exitStripe);
+
+        const stairLabelTex = trackTex(
+          createFeatureLabelTexture('ESCALERAS EMERG.', '#6e3b53', '#ffffff', maxAniso)
+        );
+        const stairLabel = new THREE.Mesh(
+          trackGeo(new THREE.PlaneGeometry(2.25, 0.52)),
+          trackMat(new THREE.MeshBasicMaterial({ map: stairLabelTex, side: THREE.DoubleSide }))
+        );
+        stairLabel.position.set(6.75, 1.15, -2.35);
+        stairLabel.rotation.y = Math.PI / 2;
+        group.add(stairLabel);
       } else {
         const slabMat = trackMat(
           new THREE.MeshStandardMaterial({
@@ -666,6 +873,7 @@ export default function TorreNorte3DView({
         }
 
         // Terrazas (Piso 4 y Piso 7): UNA A CADA LADO DEL PISO (Izquierda -X y Derecha +X, nunca juntas)
+        // Desplazadas ligeramente al frente (z = +0.90) para dejar libre la torre de escaleras de emergencia en z = [-3.35, -1.35]
         if (isTerraceFloor) {
           const deckMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.82, metalness: 0.08 }));
           const parapetMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.7, metalness: 0.06 }));
@@ -680,54 +888,54 @@ export default function TorreNorte3DView({
 
           for (const side of terraceSides) {
             const tGroup = new THREE.Group();
-            tGroup.position.set(side.xOffset, 0, 0);
+            tGroup.position.set(side.xOffset, 0, 0.9);
 
             // Tiled open terrace deck slab
-            const deck = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.4, 0.18, 4.4)), deckMat);
+            const deck = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.4, 0.18, 3.8)), deckMat);
             deck.castShadow = !isSoftwareGl;
             deck.receiveShadow = !isSoftwareGl;
             tGroup.add(deck);
 
             // Ochre outer parapet walls (3 open-air sides)
-            const outerWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.16, 0.44, 4.4)), parapetMat);
+            const outerWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.16, 0.44, 3.8)), parapetMat);
             outerWall.position.set(side.dir * 1.12, 0.31, 0);
             tGroup.add(outerWall);
 
             const frontWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.4, 0.44, 0.16)), parapetMat);
-            frontWall.position.set(0, 0.31, 2.12);
+            frontWall.position.set(0, 0.31, 1.82);
             tGroup.add(frontWall);
 
             const backWall = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.4, 0.44, 0.16)), parapetMat);
-            backWall.position.set(0, 0.31, -2.12);
+            backWall.position.set(0, 0.31, -1.82);
             tGroup.add(backWall);
 
             // Open pergola canopy beams overhead
             const post1 = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.88, 0.08)), pillarMat);
-            post1.position.set(side.dir * 1.05, 0.52, 2.0);
+            post1.position.set(side.dir * 1.05, 0.52, 1.72);
             tGroup.add(post1);
 
             const post2 = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.88, 0.08)), pillarMat);
-            post2.position.set(side.dir * 1.05, 0.52, -2.0);
+            post2.position.set(side.dir * 1.05, 0.52, -1.72);
             tGroup.add(post2);
 
-            for (let lz = -1.6; lz <= 1.6; lz += 0.8) {
+            for (let lz = -1.4; lz <= 1.4; lz += 0.7) {
               const slat = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.25, 0.05, 0.14)), steelMat);
               slat.position.set(0, 0.95, lz);
               tGroup.add(slat);
             }
 
             // Stainless-steel dining tables & green planters
-            for (const tz of [-0.95, 0.95]) {
-              const table = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.72, 0.24, 0.95)), steelMat);
+            for (const tz of [-0.82, 0.82]) {
+              const table = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.72, 0.24, 0.85)), steelMat);
               table.position.set(-side.dir * 0.18, 0.21, tz);
               tGroup.add(table);
             }
 
-            const planter = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.32, 0.24, 1.3)), planterMat);
+            const planter = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.32, 0.24, 1.15)), planterMat);
             planter.position.set(side.dir * 0.76, 0.21, 0);
             tGroup.add(planter);
 
-            const foliage = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.28, 0.34, 1.15)), plantMat);
+            const foliage = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.28, 0.34, 1.0)), plantMat);
             foliage.position.set(side.dir * 0.76, 0.44, 0);
             tGroup.add(foliage);
 
@@ -744,6 +952,107 @@ export default function TorreNorte3DView({
             group.add(tGroup);
           }
         }
+
+        // Exterior Emergency Staircase Module (Piso 1 .. Piso 10, attached along right-rear facade x=4.4..6.56, z=-3.35..-1.35)
+        const stairGroup = new THREE.Group();
+
+        // Beige stone-clad corner pilasters connecting stair tower to glass curtain wall
+        for (const pz of [-1.36, -3.34]) {
+          const pilaster = new THREE.Mesh(stairPilasterGeo, stairPilasterMat);
+          pilaster.position.set(4.46, 0.52, pz);
+          stairGroup.add(pilaster);
+        }
+
+        // Dark vertical steel support columns inside outer stair bay
+        for (const cz of [-1.48, -3.22]) {
+          const col = new THREE.Mesh(stairColGeo, stairSteelDarkMat);
+          col.position.set(5.96, 0.52, cz);
+          stairGroup.add(col);
+        }
+
+        // Floor-level inner bridge landing & emergency exit doorway on building side wall
+        const innerLanding = new THREE.Mesh(stairInnerLandingGeo, stairPilasterMat);
+        innerLanding.position.set(4.76, 0.0, -2.35);
+        stairGroup.add(innerLanding);
+
+        const exitDoor = new THREE.Mesh(stairExitDoorGeo, stairExitSignMat);
+        exitDoor.position.set(4.41, 0.48, -2.35);
+        stairGroup.add(exitDoor);
+
+        // Horizontal structural tie beams connecting inner slab to outer column bay
+        for (const tz of [-1.38, -3.32]) {
+          const tie = new THREE.Mesh(stairTieBeamGeo, stairTrimMat);
+          tie.position.set(5.2, 0.01, tz);
+          stairGroup.add(tie);
+        }
+
+        if (floor.sortOrder === 1) {
+          // Ground-to-Piso 1 starter run descending to exterior plaza
+          addSlopedFlight(
+            stairGroup,
+            flightPanelGeoA,
+            flightRailGeoA,
+            flightSoffitGeoA,
+            5.5,
+            -0.21,
+            -1.85,
+            -flightAngleA,
+            5.06,
+            5.94,
+            0.03,
+            -0.42
+          );
+        }
+
+        if (floor.sortOrder < 10) {
+          // Outer cantilevered chamfered mid-landing at y = 0.52 with plum-framed beige guardrails
+          const midDeck = new THREE.Mesh(chamferDeckGeo, stairPilasterMat);
+          midDeck.position.set(5.88, 0.46, -2.35);
+          midDeck.castShadow = !isSoftwareGl;
+          midDeck.receiveShadow = !isSoftwareGl;
+          stairGroup.add(midDeck);
+          addChamferedBalconyRail(stairGroup, 0.52);
+
+          // Lower switchback flight (front lane z = -1.85): inner floor landing -> outer chamfered mid-landing
+          addSlopedFlight(
+            stairGroup,
+            flightPanelGeoA,
+            flightRailGeoA,
+            flightSoffitGeoA,
+            5.5,
+            0.29,
+            -1.85,
+            flightAngleA,
+            5.06,
+            5.94,
+            0.05,
+            0.51
+          );
+
+          // Upper switchback flight (back lane z = -2.85): outer chamfered mid-landing -> next floor inner landing
+          addSlopedFlight(
+            stairGroup,
+            flightPanelGeoB,
+            flightRailGeoB,
+            flightSoffitGeoB,
+            5.5,
+            0.78,
+            -2.85,
+            -flightAngleB,
+            5.94,
+            5.06,
+            0.52,
+            1.02
+          );
+        } else {
+          // Piso 10 top arrival balcony with chamfered safety parapet
+          const topDeck = new THREE.Mesh(chamferDeckGeo, stairPilasterMat);
+          topDeck.position.set(5.88, -0.05, -2.35);
+          stairGroup.add(topDeck);
+          addChamferedBalconyRail(stairGroup, 0.01);
+        }
+
+        group.add(stairGroup);
       }
 
       // Roof cap above Piso 10
@@ -778,6 +1087,9 @@ export default function TorreNorte3DView({
       } else if (floor.code === 'PISO-04' || floor.code === 'PISO-07') {
         hitBox.scale.set(1.48, 1.0, 1.0);
         hitBox.position.y = 0.45;
+      } else if (!isSotano) {
+        hitBox.scale.set(1.22, 1.0, 1.0);
+        hitBox.position.set(0.85, 0.45, 0);
       } else {
         hitBox.position.y = 0.45;
       }
@@ -1068,7 +1380,7 @@ export default function TorreNorte3DView({
               Vista 3D Interactiva Torre Norte (Sótano y Parqueadero a Piso 10)
             </h3>
             <p className="text-[11px] text-slate-500">
-              Arrastre para rotar, use la rueda para acercar y haga clic en cualquier nivel. Incluye Sótano/Parqueadero, Biblioteca (P1), Auditorios (P1 y P2) y Terrazas separadas a cada lado (P4 y P7).
+              Arrastre para rotar, use la rueda para acercar y haga clic en cualquier nivel. Incluye Sótano/Parqueadero, Biblioteca (P1), Auditorios (P1 y P2), Terrazas separadas a cada lado (P4 y P7) y Escaleras de Emergencia exteriores.
             </p>
           </div>
         </div>
@@ -1116,6 +1428,17 @@ export default function TorreNorte3DView({
               >
                 <Eye className="w-3.5 h-3.5" />
                 Torre Completa
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('stairs')}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                  activePreset === 'stairs'
+                    ? 'bg-emerald-700 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                Escaleras Emerg.
               </button>
               <button
                 type="button"
