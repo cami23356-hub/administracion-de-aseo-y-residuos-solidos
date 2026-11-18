@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldCheck, Mail, Lock, User as UserIcon, LogIn, UserPlus, BookOpen } from 'lucide-react';
-import { apiFetch, setToken } from '../utils/api';
-import { User } from '../types/cesge';
+import { ALLOWED_ROLES, ensureDefaultUsersLoaded, loginLocal, registerLocal } from '../utils/localAuth';
+import { Role, User } from '../types/cesge';
 import UserManualPanel from './UserManualPanel';
 
 interface LoginViewProps {
@@ -23,11 +23,16 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regFullName, setRegFullName] = useState('');
+  const [regRole, setRegRole] = useState<Role>('PERSONAL DE ASEO');
   const [regPassword, setRegPassword] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
   const [showManual, setShowManual] = useState(false);
+
+  useEffect(() => {
+    ensureDefaultUsersLoaded();
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -35,11 +40,7 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setInfo('');
     setLoading(true);
     try {
-      const res = await apiFetch<{ token: string; user: User }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ identifier, password }),
-      });
-      setToken(res.token);
+      const res = await loginLocal(identifier, password);
       onLoginSuccess(res.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible iniciar sesión.');
@@ -54,18 +55,22 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
     setInfo('');
     setLoading(true);
     try {
-      await apiFetch('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: regUsername,
-          email: regEmail,
-          fullName: regFullName,
-          password: regPassword,
-        }),
+      const created = await registerLocal({
+        username: regUsername,
+        email: regEmail,
+        fullName: regFullName,
+        password: regPassword,
+        role: regRole,
       });
-      setInfo('Cuenta creada correctamente. Ya puede iniciar sesión con su usuario o correo Gmail.');
-      setIdentifier(regEmail);
+      setInfo(
+        `Cuenta creada correctamente con perfil ${created.user.role}. Ya puede iniciar sesión con su usuario o correo.`
+      );
+      setIdentifier(created.user.email);
       setPassword(regPassword);
+      setRegUsername('');
+      setRegEmail('');
+      setRegFullName('');
+      setRegPassword('');
       setMode('login');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No fue posible registrar el usuario.');
@@ -279,6 +284,22 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
                         className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                       />
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      Perfil institucional
+                    </label>
+                    <select
+                      value={regRole}
+                      onChange={(e) => setRegRole(e.target.value as Role)}
+                      className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    >
+                      {ALLOWED_ROLES.map((roleOption) => (
+                        <option key={roleOption} value={roleOption}>
+                          {roleOption}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5">

@@ -36,7 +36,8 @@ import {
   WasteBin,
   WasteRecord,
 } from './types/cesge';
-import { apiFetch, getToken, setToken } from './utils/api';
+import { apiFetch } from './utils/api';
+import { getSessionUserLocal, logoutLocal } from './utils/localAuth';
 import LoginView from './components/LoginView';
 import DashboardHome from './components/DashboardHome';
 import BuildingMapModule from './components/BuildingMapModule';
@@ -142,17 +143,16 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const token = getToken();
-      if (!token) {
+      const sessionUser = getSessionUserLocal();
+      if (!sessionUser) {
         setCheckingAuth(false);
         return;
       }
       try {
-        const res = await apiFetch<{ user: User }>('/api/auth/me');
-        setUser(res.user);
+        setUser(sessionUser);
         await loadAllData();
       } catch {
-        setToken(null);
+        logoutLocal();
         setUser(null);
       } finally {
         setCheckingAuth(false);
@@ -182,12 +182,7 @@ export default function App() {
   }
 
   async function handleLogout() {
-    try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
-    } catch {
-      // Clear local session regardless
-    }
-    setToken(null);
+    logoutLocal();
     setUser(null);
     setActiveTab('dashboard');
   }
